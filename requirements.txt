@@ -1,0 +1,32 @@
+# Core data stack
+pandas>=2.0
+numpy>=1.24
+
+# Modeling
+scikit-learn>=1.3
+xgboost>=2.0
+lightgbm>=4.0
+imbalanced-learn>=0.11      # SMOTE and other resampling methods
+
+# Hyperparameter optimization
+optuna>=3.4
+
+# Interpretability
+shap>=0.44
+
+# Visualization
+matplotlib>=3.7
+seaborn>=0.12
+
+# Model persistence
+joblib>=1.3
+
+# Notebooks
+jupyter>=1.0
+notebook>=7.0
+
+# Utilities
+pyyaml>=6.0
+
+# Testing (optional, for src/ unit tests)
+pytest>=7.4

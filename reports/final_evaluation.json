@@ -1,0 +1,23 @@
+{
+  "chosen_threshold": 0.72,
+  "cost_assumption": {
+    "false_negative_cost": 5.0,
+    "false_positive_cost": 1.0
+  },
+  "metrics_at_chosen_threshold": {
+    "threshold": 0.72,
+    "roc_auc": 0.8698180339471023,
+    "pr_auc": 0.40222315186982305,
+    "precision": 0.35462081670248696,
+    "recall": 0.5760598503740648,
+    "f1": 0.43899657924743446
+  },
+  "metrics_at_default_threshold_0.5": {
+    "threshold": 0.5,
+    "roc_auc": 0.8698180339471023,
+    "pr_auc": 0.40222315186982305,
+    "precision": 0.21810870770937327,
+    "recall": 0.7845386533665836,
+    "f1": 0.34132581100141046
+  }
+}

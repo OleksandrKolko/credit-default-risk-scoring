@@ -1,0 +1,6 @@
+{
+  "model": "lightgbm",
+  "imbalance_strategy": "class_weight",
+  "pr_auc_mean": 0.39558837920580314,
+  "roc_auc_mean": 0.8625532584569641
+}
