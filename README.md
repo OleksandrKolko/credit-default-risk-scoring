@@ -140,12 +140,10 @@ the training set:
 | `estimated_monthly_debt_payment` | `DebtRatio * MonthlyIncome` | −0.02 |
 | `real_estate_loan_share` | `NumberRealEstateLoansOrLines / (NumberOfOpenCreditLinesAndLoans + 1)` | −0.01 |
 
-Worth being upfront about: `estimated_monthly_debt_payment` was hypothesized to correlate *positively*
-with default (higher absolute debt burden → more risk), but shows a weak negative correlation instead —
-likely because it's dominated by the income term rather than isolating debt burden. It's kept in the
-feature set (regularization / tree feature importance will naturally downweight it if it's not useful),
-but this is flagged here rather than only in code comments, since not every engineered feature works out
-as hypothesized, and that's a normal, honest part of the process.
+`estimated_monthly_debt_payment` was expected to correlate *positively* with default (higher absolute
+debt burden → more risk), but shows a weak negative correlation instead — likely because it's dominated
+by the income term rather than isolating debt burden on its own. Kept in the feature set regardless,
+since regularization and tree-based feature importance naturally downweight features that aren't useful.
 
 ## Results
 
@@ -206,9 +204,9 @@ Full trial history is in `reports/optuna_study.db` (inspectable with `optuna-das
 sqlite:///reports/optuna_study.db` if you want to explore it visually), search space and objective
 function in `src/train_models.py`.
 
-The gain from tuning here is modest (+1.6% relative PR-AUC) rather than dramatic — worth being honest
-about: LightGBM's defaults are already quite strong on tabular data like this, so tuning refines rather
-than transforms performance. The final model is fit with these tuned parameters on the **full** training
+The gain from tuning here is modest (+1.6% relative PR-AUC) rather than dramatic: LightGBM's defaults
+are already quite strong on tabular data like this, so tuning refines rather than transforms
+performance. The final model is fit with these tuned parameters on the **full** training
 set (all 120,000 rows) and saved to `models/final_model.joblib`. As a sanity check on the untouched test
 set (30,000 rows, evaluated once): **ROC-AUC = 0.870, PR-AUC = 0.402** — consistent with the CV estimate,
 confirming no leakage or overfitting crept in. The full evaluation (threshold selection, confusion
@@ -272,19 +270,16 @@ and real-estate features play a smaller, secondary role.
 
 ### Four individual clients, four different stories
 
-Rather than one generic example, four clients were deliberately chosen to cover different situations —
-the full breakdown (predicted probability, actual outcome, top contributing factors) is in
-`reports/shap_client_examples.json`, plots in `reports/figures/shap_waterfall_*.png`:
+Four clients were chosen to cover different situations — the full breakdown (predicted probability,
+actual outcome, top contributing factors) is in `reports/shap_client_examples.json`, plots in
+`reports/figures/shap_waterfall_*.png`:
 
 | Client | P(default) | Actual | Story |
 |---|---|---|---|
 | Highest risk | 97.6% | Defaulted | Correctly flagged — driven by past-due history, high utilization, 90+ day lates |
 | Lowest risk | 3.2% | No default | Correctly cleared — low utilization, favorable age, clean past-due history |
 | Borderline (at chosen threshold 0.72) | 72.0% | **No default** | A false positive right at the decision boundary — illustrates that *some* good borrowers will still be declined at this threshold, the real cost of raising it from 0.5 |
-| "Missed" default | 4.1% | **Defaulted** | A false negative — the model was confident this borrower was safe (low utilization, unremarkable past-due history) and was wrong. Being honest about this: not every default is predictable from this feature set, and this is exactly the kind of case worth discussing as a model limitation, not hiding |
-
-Including the "missed default" case on purpose — a portfolio project that only shows correct predictions
-tells an incomplete (and less credible) story.
+| "Missed" default | 4.1% | **Defaulted** | A false negative — the model scored this borrower as safe (low utilization, unremarkable past-due history). Not every default is predictable from this feature set. |
 
 ### `predict()` — the production-facing API
 
@@ -319,18 +314,17 @@ result = predictor.predict({
 training (no separate/duplicated logic), then returns a ranked, human-readable explanation alongside the
 probability — this is the interface a downstream application (or a loan officer) would actually call.
 
-### A bug worth knowing about
+### Pickling gotcha: `__main__` module references
 
-While building this, `joblib.load()` on the saved `DataCleaner` failed with `AttributeError: Can't get
-attribute 'DataCleaner' on <module '__main__'>` when loaded from `inference.py`, despite loading fine
-everywhere it had been used before. Cause: `data_preprocessing.py` had only ever been *run* via
-`python -m src.data_preprocessing`, which makes Python set that module's `__name__` to `"__main__"` —
-so `DataCleaner` got pickled with a module reference of `"__main__"`, which only resolves back correctly
-if whatever loads it later is *also* being run as `__main__` (never true from a different file). Fixed by
-re-importing the module under its real package path in the `if __name__ == "__main__":` block before
-calling `main()`, so the class is always pickled under the stable `src.data_preprocessing` path regardless
-of how the script was invoked. A good example of why testing an artifact from a *different* entry point
-than the one that created it matters.
+`joblib.load()` on the saved `DataCleaner` failed with `AttributeError: Can't get attribute
+'DataCleaner' on <module '__main__'>` when loaded from `inference.py`, despite loading fine everywhere
+else. Cause: `data_preprocessing.py` had only ever been *run* via `python -m src.data_preprocessing`,
+which makes Python set that module's `__name__` to `"__main__"` — so `DataCleaner` got pickled with a
+module reference of `"__main__"`, which only resolves back correctly if whatever loads it later is
+*also* being run as `__main__` (never true from a different file). Fixed by re-importing the module
+under its real package path in the `if __name__ == "__main__":` block before calling `main()`, so the
+class is pickled under the stable `src.data_preprocessing` path regardless of how the script was
+invoked.
 
 ## How to run
 
