@@ -7,8 +7,7 @@ next two years, based on the Kaggle **"Give Me Some Credit"** dataset.
 > **At a glance:** 4 models × 2 imbalance strategies compared via 5-fold CV → LightGBM + class
 > weighting wins → Optuna-tuned → evaluated once on a held-out test set (**ROC-AUC 0.870, PR-AUC
 > 0.402**) → decision threshold chosen via a cost-driven analysis, not the default 0.5 → SHAP
-> explanations for individual clients, including one the model got wrong. Full write-up below;
-> [What to discuss in an interview](#what-to-discuss-in-an-interview) has the short version.
+> explanations for individual clients, including one the model got wrong.
 
 ## Table of contents
 
@@ -20,7 +19,7 @@ next two years, based on the Kaggle **"Give Me Some Credit"** dataset.
 - [Final test-set evaluation](#final-test-set-evaluation-srcevaluatepy)
 - [Interpretability](#interpretability-srcinferencepy-shap)
 - [How to run](#how-to-run)
-- [What to discuss in an interview](#what-to-discuss-in-an-interview)
+- [Limitations](#limitations)
 
 ## Problem statement
 
@@ -320,7 +319,7 @@ result = predictor.predict({
 training (no separate/duplicated logic), then returns a ranked, human-readable explanation alongside the
 probability — this is the interface a downstream application (or a loan officer) would actually call.
 
-### A real bug worth mentioning at interview
+### A bug worth knowing about
 
 While building this, `joblib.load()` on the saved `DataCleaner` failed with `AttributeError: Can't get
 attribute 'DataCleaner' on <module '__main__'>` when loaded from `inference.py`, despite loading fine
@@ -359,95 +358,21 @@ jupyter lab notebooks/01_eda.ipynb                    # EDA + why each cleaning 
 jupyter lab notebooks/02_results_and_shap_demo.ipynb   # model comparison, final metrics, SHAP
 ```
 
-## What to discuss in an interview
+## Limitations
 
-A quick-reference summary of the decisions and findings worth being able to talk through — organized so
-you can scan it before a call rather than re-read the whole README.
+A few deliberate scope decisions and honest caveats, documented rather than left implicit:
 
-### Data quality findings (the most interview-worthy part)
-
-- **The 96/98 sentinel code** in the past-due columns (`notebooks/01_eda.ipynb`, `src/data_preprocessing.py`):
-  269 rows carry an impossible value (96 or 98) across all three delinquency-count columns together, and
-  that subset has a **~55% default rate vs. ~6.7% overall** — an 8x difference. Treated as a flag
-  (`had_past_due_sentinel_code`), not dropped or left as a raw numeric outlier. This is the single best
-  example in the project of *not* discarding "bad-looking" data without checking whether it's actually
-  informative first.
-- **`MonthlyIncome` missingness is informative, not random** — ~94% of rows with missing income also have
-  `DebtRatio > 1`, suggesting the field may hold a different quantity in that subset. Flagged
-  (`monthly_income_missing`), not just silently imputed.
-- **Winsorizing, not hand-picked caps** — `RevolvingUtilizationOfUnsecuredLines` and `DebtRatio` have
-  extreme outliers (up to ~50,708 and ~329,664). Capped at the 97.5th percentile *learned from training
-  data*, rather than an arbitrary domain threshold like "cap at 2".
-
-### Methodology choices that prevent leakage
-
-- All cleaning statistics (medians, percentile caps) are fit on the **training split only**, via a
-  scikit-learn `Transformer` (`DataCleaner`), then applied unchanged to the test set and to new clients
-  at inference time.
-- **SMOTE only ever sees the training fold** during cross-validation — enforced by using
-  `imblearn.pipeline.Pipeline` (not plain sklearn `Pipeline`), not just by convention. Unit-tested
-  explicitly (`tests/test_train_models.py`).
-- **The decision threshold (0.72) was chosen using out-of-fold predictions on the training set**, never
-  the test set — because threshold selection is itself a modeling decision, and tuning it against the
-  test set would be a subtle form of leakage even though it's tempting to treat the test set as "just for
-  reporting."
-- The test set is touched **exactly once**, in `src/evaluate.py`, after every other decision was already
-  locked in.
-
-### Modeling decisions
-
-- **Why 8 configurations, not 4**: comparing model families without also comparing imbalance strategies
-  would have hidden which part of the improvement came from where. Class weighting and SMOTE were
-  compared head-to-head for every model.
-- **Why PR-AUC as the primary criterion**, not accuracy or F1: with a 6.7% default rate, accuracy is
-  trivially high for a useless model; PR-AUC is more sensitive to minority-class performance specifically,
-  which is what a lender cares about.
-- **Class weighting vs. SMOTE affect precision/recall in opposite directions** at a fixed threshold —
-  class weighting reweights the loss function directly (pushes recall up broadly), SMOTE only rebalances
-  the data (models stay more conservative at the same threshold) — while ROC-AUC/PR-AUC (threshold-free)
-  were similar-to-better for class weighting. This is why the comparison used threshold-independent
-  metrics to pick a winner, and reported precision/recall separately for context.
-- **Random Forest was both the weakest performer and by far the slowest** (87-172s/fold vs. 2-13s for the
-  boosting models) — an honest, unglamorous finding, not every algorithm needed is a good fit.
-- **Optuna's gain was modest** (+1.6% relative PR-AUC over LightGBM defaults) — worth saying plainly
-  rather than overstating a routine tuning pass as more impactful than it was.
-- **Why the final threshold (0.72) is *higher* than 0.5, not lower**: `class_weight="balanced"` already
-  pushed the model to flag risk aggressively (recall 78.5% at 0.5), and with defaulters outnumbered ~14:1,
-  even a moderate false-positive rate means a large absolute number of wrongly-declined good borrowers.
-  Raising the threshold traded some recall for enough precision that total illustrative cost went down
-  even while weighting missed defaults 5x as heavily.
-
-### Interpretability
-
-- SHAP values are reported in **probability space** (percentage points), not the default log-odds
-  `TreeExplainer` output — because log-odds contributions aren't meaningful to a non-technical audience,
-  and being able to explain a decision to a loan officer or applicant was the actual point of this step.
-- **Four clients were chosen deliberately** to include a false positive (borderline, declined but wouldn't
-  have defaulted) and a false negative (confidently scored safe, defaulted anyway) — not just the two
-  flattering "obviously correct" cases. A project that only shows correct predictions is a weaker, less
-  credible demonstration of understanding the model's actual behavior.
-
-### Software engineering
-
-- Modular `src/` design (cleaning / features / training / evaluation / inference each separate,
-  composable via consistent fit/transform interfaces) rather than one notebook, specifically so each
-  piece is independently testable — 28 unit tests across the project (`tests/`).
-- **A real bug worth mentioning**: `DataCleaner` initially failed to load with `AttributeError: Can't get
-  attribute 'DataCleaner' on <module '__main__'>` when used from a different entry point than the one
-  that created it — caused by how `python -m` sets `__name__ == "__main__"`, which pickle then bakes into
-  the saved artifact's class reference. Fixed by re-importing the module under its canonical package path
-  before running its `main()`. A good illustration of why testing artifact loading from more than one
-  entry point matters.
-
-### Honest limitations (good to raise before being asked)
-
-- The illustrative 5:1 cost ratio for threshold selection is a stand-in for real loss/margin figures a
-  lender would actually supply — the *methodology* is the deliverable, not this specific number.
-- `estimated_monthly_debt_payment` didn't correlate the direction it was hypothesized to — flagged rather
-  than quietly dropped, as a reminder that not every engineered feature works out.
-- Optuna search space and trial budget (30 trials) were sized for reasonable turnaround, not exhaustively
-  searched — documented as a deliberate scope decision.
-- Cleaning statistics are fit once on the full training split rather than refit inside every CV fold
-  (a stricter, marginally more rigorous alternative) — a reasonable simplification given >100k training
-  rows makes those statistics highly stable, and noted explicitly in `src/data_preprocessing.py` rather
-  than left implicit.
+- **The 5:1 cost ratio used for threshold selection is illustrative.** It reflects the general
+  credit-risk heuristic that a missed default costs more than a declined good borrower, but a real
+  deployment would use the lender's actual loss-given-default and margin figures rather than this
+  placeholder ratio. The methodology (choosing a threshold via train-only out-of-fold predictions) is
+  the deliverable, not this specific number.
+- **`estimated_monthly_debt_payment` didn't correlate in the hypothesized direction** (see
+  [Engineered features](#approach)) — kept in the feature set rather than quietly dropped, since
+  regularization and feature importance naturally downweight it if it's not useful.
+- **The Optuna search (30 trials) is not exhaustive** — sized for reasonable turnaround rather than an
+  unbounded search budget.
+- **`DataCleaner`'s statistics are fit once on the full training split**, not refit inside every
+  cross-validation fold. A stricter alternative would refit per-fold; this is a reasonable
+  simplification given the training set is large enough (>100k rows) that the fitted statistics are
+  highly stable either way — noted explicitly in `src/data_preprocessing.py`.
